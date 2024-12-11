@@ -64,26 +64,53 @@ def snomed_to_icd():
             snomed_id = term['ui']
             snomed_name = term.get('name', 'N/A')
 
-            url = f"https://uts-ws.nlm.nih.gov/rest/content/current/CUI/{snomed_id}/atoms"
-            params = {'ticket': ticket, 'sabs': 'ICD10CM'}
-            response = requests.get(url, params=params)
+            # Iterate through all pages of mappings
+            page = 1
+            all_icd_codes = []
+            while True:
+                url = f"https://uts-ws.nlm.nih.gov/rest/content/current/CUI/{snomed_id}/atoms"
+                params = {'ticket': ticket, 'sabs': 'ICD10CM', 'pageNumber': page}
+                response = requests.get(url, params=params)
 
-            if response.status_code == 200:
+                if response.status_code != 200:
+                    # Log and skip if there's an issue
+                    results.append({
+                        'snomed_id': snomed_id,
+                        'snomed_name': snomed_name,
+                        'error': 'Failed to retrieve mappings'
+                    })
+                    break
+
                 data = response.json().get('result', [])
+                if not data:
+                    break
+
+                # Extract ICD-10 codes
                 icd_codes = [
                     {
-                        'code': atom['code'].split('/')[-1],
-                        'description': atom['name']
+                        'code': atom.get('code', '').split('/')[-1],
+                        'description': atom.get('name', 'N/A')
                     }
                     for atom in data if 'code' in atom
                 ]
-                results.append({'snomed_id': snomed_id, 'snomed_name': snomed_name, 'icd10': icd_codes})
-            else:
-                results.append({'snomed_id': snomed_id, 'snomed_name': snomed_name, 'icd10': []})
+                all_icd_codes.extend(icd_codes)
+
+                # Check if there's another page
+                if len(data) < 25:  # Assuming 25 results per page
+                    break
+                page += 1
+
+            # Append final results
+            results.append({
+                'snomed_id': snomed_id,
+                'snomed_name': snomed_name,
+                'icd10': all_icd_codes
+            })
 
         return jsonify(results)
     except Exception as e:
         return jsonify({'error': f"Internal Server Error: {str(e)}"}), 500
+
 
 from flask import session
 

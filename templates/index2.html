@@ -45,54 +45,76 @@
 
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script>
-        $(document).ready(function() {
-            const showLoading = () => $('#loading-spinner').show();
-            const hideLoading = () => $('#loading-spinner').hide();
+$(document).ready(function() {
+    const showLoading = () => $('#loading-spinner').show();
+    const hideLoading = () => $('#loading-spinner').hide();
 
-            // Handle "Select All" for SCT Codes
-            $(document).on('change', '#select-all-sct', function() {
-                const isChecked = $(this).is(':checked');
-                $('.snomed-checkbox').prop('checked', isChecked);
-            });
+    // Handle "Select All" for SCT Codes
+    $(document).on('change', '#select-all-sct', function() {
+        const isChecked = $(this).is(':checked');
+        $('.snomed-checkbox').prop('checked', isChecked);
+    });
 
-            // SNOMED Search
-            $('#snomed-form').on('submit', function(e) {
-                e.preventDefault();
-                const term = $('#snomed-term').val();
-                console.log("Submitting term:", term);
-                showLoading();
+    // SNOMED Search
 
-                $.ajax({
-                    url: '/app2/snomed/search',
-                    method: 'POST',
-                    contentType: 'application/json',
-                    data: JSON.stringify({ term: term }),
-                    success: function(data) {
-                        console.log("Data received from search:", data);
+ $(document).ready(function () {
+    const showLoading = () => $('#loading-spinner').show();
+    const hideLoading = () => $('#loading-spinner').hide();
 
-                        let html = '<ul class="list-group">';
-                        data.forEach(item => {
-                            html += `
-                                <li class="list-group-item">
-                                    <input type="checkbox" class="snomed-checkbox" value="${item.ui}" data-name="${item.name}">
-                                    ${item.name}
-                                </li>`;
-                        });
-                        html += '</ul>';
-                        $('#snomed-results').html(html);
+    // SNOMED Search
+    $('#snomed-form').on('submit', function (e) {
+        e.preventDefault(); // Prevent default form submission
+        const term = $('#snomed-term').val();
+        if (!term) {
+            alert('Please enter a term to search.');
+            return;
+        }
 
-                        $('#select-all-sct, #select-all-sct-label').show();
-                        $('#map-btn').show();
-                    },
-                    error: function(jqXHR, textStatus, errorThrown) {
-                        console.error("Search request failed:", textStatus, errorThrown);
-                        $('#snomed-results').html('<p class="text-danger">Error fetching data. Please try again.</p>');
-                    },
-                    complete: function() {
-                        hideLoading();
-                    }
-                });
-            });
+        console.log("Submitting term:", term);
+        showLoading();
+
+        // Clear previous results
+        $('#snomed-results').empty();
+        $('#icd-mapping-results').empty();
+
+        $.ajax({
+            url: '/app2/snomed/search',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ term: term }),
+            success: function (data) {
+                console.log("Data received from search:", data);
+
+                if (data && data.length > 0) {
+                    let html = '<ul class="list-group">';
+                    data.forEach(item => {
+                        html += `
+                            <li class="list-group-item">
+                                <input type="checkbox" class="snomed-checkbox" value="${item.ui}" data-name="${item.name}">
+                                ${item.name}
+                            </li>`;
+                    });
+                    html += '</ul>';
+                    $('#snomed-results').html(html);
+
+                    $('#select-all-sct, #select-all-sct-label').show();
+                    $('#map-btn').show();
+                } else {
+                    $('#snomed-results').html('<p class="text-warning">No results found.</p>');
+                }
+            },
+            error: function (jqXHR, textStatus, errorThrown) {
+                console.error("Search request failed:", textStatus, errorThrown);
+                $('#snomed-results').html('<p class="text-danger">Error fetching data. Please try again.</p>');
+            },
+            complete: function () {
+                hideLoading();
+            }
+        });
+    });
+});
+
+
 
             // Map to ICD-10
             $('#map-btn').on('click', function() {
