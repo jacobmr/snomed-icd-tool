@@ -46,16 +46,12 @@ def search_valuesets(term):
 def index():
     return render_template('index.html')
 
-
-@app.route('/sync-git', methods=['POST'])
+@app.route('/sync-git', methods=['GET', 'POST'])
 def sync_git():
     try:
-        # Replace with your project directory
         project_dir = "/home/jacobr/vsac/"
-
-        # Run git commands
         subprocess.run(["git", "-C", project_dir, "add", "."], check=True)
-        subprocess.run(["git", "-C", project_dir, "commit", "-m", "Auto-sync from web button"], check=True)
+        subprocess.run(["git", "-C", project_dir, "commit", "-m", "Auto-sync from direct access"], check=True)
         subprocess.run(["git", "-C", project_dir, "push", "origin", "main"], check=True)
 
         return jsonify({"message": "Git sync completed successfully"}), 200
@@ -65,7 +61,6 @@ def sync_git():
     except Exception as e:
         print(f"Unexpected error during Git sync: {e}")
         return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
-
 
 
 @app.route('/snomed-tool')
