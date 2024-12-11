@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SNOMED-ICD Mapping Tool</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+</head>
+<body class="p-3">
+    <div class="container">
+        <h1>SNOMED-ICD Mapping Tool</h1>
+
+        <!-- Help Section -->
+        <div class="alert alert-info" role="alert">
+            <strong>How to Use:</strong> Enter a SNOMED term in the search bar and press "Search". Select terms from the results and click "Map Selected to ICD-10" to view their mappings. You can generate a value set after selecting the ICD-10 mappings.
+        </div>
+
+        <!-- Form for SNOMED search -->
+        <form id="snomed-form">
+            <input type="text" id="snomed-term" class="form-control" placeholder="Enter SNOMED term" required>
+            <button type="submit" class="btn btn-primary mt-3">Search</button>
+        </form>
+
+        <!-- Loading spinner -->
+        <div id="loading-spinner" class="spinner-border text-primary mt-4" style="display: none;" role="status">
+            <span class="sr-only">Loading...</span>
+        </div>
+
+        <!-- Results for SNOMED search -->
+        <div class="mt-4">
+            <input type="checkbox" id="select-all-sct" style="display: none;">
+            <label for="select-all-sct" id="select-all-sct-label" style="display: none;">Select All</label>
+            <div id="snomed-results"></div>
+        </div>
+
+        <!-- Button for mapping selected SNOMED terms -->
+        <button id="map-btn" class="btn btn-success mt-3" style="display: none;">Map Selected to ICD-10</button>
+
+        <!-- Results for ICD mappings -->
+        <div id="icd-results" class="mt-4"></div>
+
+        <!-- Button to generate the value set -->
+        <button id="generate-btn" class="btn btn-secondary mt-3" style="display: none;">Generate Value Set</button>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+        $(document).ready(function() {
+            const showLoading = () => $('#loading-spinner').show();
+            const hideLoading = () => $('#loading-spinner').hide();
+
+            // Handle "Select All" for SCT Codes
+            $(document).on('change', '#select-all-sct', function() {
+                const isChecked = $(this).is(':checked');
+                $('.snomed-checkbox').prop('checked', isChecked);
+            });
+
+            // SNOMED Search
+            $('#snomed-form').on('submit', function(e) {
+                e.preventDefault();
+                const term = $('#snomed-term').val();
+                console.log("Submitting term:", term);
+                showLoading();
+
+                $.ajax({
+                    url: '/app2/snomed/search',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ term: term }),
+                    success: function(data) {
+                        console.log("Data received from search:", data);
+
+                        let html = '<ul class="list-group">';
+                        data.forEach(item => {
+                            html += `
+                                <li class="list-group-item">
+                                    <input type="checkbox" class="snomed-checkbox" value="${item.ui}" data-name="${item.name}">
+                                    ${item.name}
+                                </li>`;
+                        });
+                        html += '</ul>';
+                        $('#snomed-results').html(html);
+
+                        $('#select-all-sct, #select-all-sct-label').show();
+                        $('#map-btn').show();
+                    },
+                    error: function(jqXHR, textStatus, errorThrown) {
+                        console.error("Search request failed:", textStatus, errorThrown);
+                        $('#snomed-results').html('<p class="text-danger">Error fetching data. Please try again.</p>');
+                    },
+                    complete: function() {
+                        hideLoading();
+                    }
+                });
+            });
+
+            // Map to ICD-10
+            $('#map-btn').on('click', function() {
+                const selectedTerms = $('.snomed-checkbox:checked').map(function() {
+                    return {
+                        ui: $(this).val(),
+                        name: $(this).data('name')
+                    };
+                }).get();
+
+                console.log("Selected terms for mapping:", selectedTerms);
+
+                $.ajax({
+                    url: '/app2/snomed/map',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ selected_terms: selectedTerms }),
+                    success: function(data) {
+                        console.log("Mapping data received:", data);
+
+                        let html = '<h3>ICD-10 Mappings</h3><table class="table">';
+                        html += '<thead><tr><th>Select</th><th>SCT Code</th><th>SCT Description</th><th>ICD-10 Code</th><th>ICD-10 Description</th></tr></thead><tbody>';
+                        data.forEach(item => {
+                            const sctDescription = item.snomed_name || 'N/A';
+                            item.icd10.forEach(mapping => {
+                                html += `
+                                    <tr>
+                                        <td><input type="checkbox" class="icd-checkbox" value="${mapping.code}"></td>
+                                        <td>${item.snomed_id}</td>
+                                        <td>${sctDescription}</td>
+                                        <td>${mapping.code}</td>
+                                        <td>${mapping.description}</td>
+                                    </tr>`;
+                            });
+                        });
+                        html += '</tbody></table>';
+                        $('#icd-results').html(html);
+                        $('#generate-btn').show();
+                    },
+                    error: function(jqXHR, textStatus, errorThrown) {
+                        console.error("Mapping request failed:", textStatus, errorThrown);
+                        $('#icd-results').html('<p class="text-danger">Error mapping data. Please try again.</p>');
+                    }
+                });
+            });
+
+            // Handle "Generate Value Set"
+            $('#generate-btn').on('click', function() {
+                const selectedMappings = $('.icd-checkbox:checked').map(function() {
+                    const row = $(this).closest('tr');
+                    return $(this).val(); // Return only ICD-10 codes
+                }).get();
+                console.log("Selected ICD-10 codes:", selectedMappings);
+
+                if (selectedMappings.length === 0) {
+                    alert("Please select at least one mapping to generate the value set.");
+                    return;
+                }
+                const searchTerm = $('#snomed-term').val();
+
+                $.ajax({
+                    url: '/app2/snomed/value-set',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ term: searchTerm, icd10_codes: selectedMappings }),
+                    success: function(data) {
+                        console.log("Value set generated:", data);
+                        window.location.href = data.download_url; // Trigger file download
+                    },
+                    error: function(jqXHR, textStatus, errorThrown) {
+                        console.error("Value set generation failed:", textStatus, errorThrown);
+                        alert("Error generating value set. Please try again.");
+                    }
+                });
+            });
+
+            // Handle "Select All" for ICD-10 mappings
+            $(document).on('change', '#select-all-icd', function() {
+                const isChecked = $(this).is(':checked');
+                $('.icd-checkbox').prop('checked', isChecked);
+            });
+        });
+    </script>
+</body>
+</html>
