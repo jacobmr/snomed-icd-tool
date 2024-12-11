@@ -140,41 +140,60 @@
             });
 
             // Handle "Generate Value Set"
-            $('#generate-btn').on('click', function() {
-                const selectedMappings = $('.icd-checkbox:checked').map(function() {
-                    const row = $(this).closest('tr');
+              $('#generate-btn').on('click', function () {
+                const selectedMappings = $('.icd-checkbox:checked').map(function () {
                     return $(this).val(); // Return only ICD-10 codes
                 }).get();
-                console.log("Selected ICD-10 codes:", selectedMappings);
+
+                console.log('Selected ICD-10 codes:', selectedMappings);
 
                 if (selectedMappings.length === 0) {
-                    alert("Please select at least one mapping to generate the value set.");
+                    alert('Please select at least one mapping to generate the value set.');
                     return;
                 }
+
                 const searchTerm = $('#snomed-term').val();
 
                 $.ajax({
-                    url: '/app2/snomed/value-set',
+                    url: '/app2/snomed/value-set', // Request to generate the file
                     method: 'POST',
                     contentType: 'application/json',
                     data: JSON.stringify({ term: searchTerm, icd10_codes: selectedMappings }),
-                    success: function(data) {
-                        console.log("Value set generated:", data);
-                        window.location.href = data.download_url; // Trigger file download
+                    success: function (data) {
+                        console.log('Value set generated:', data);
+                        alert('Value set generated successfully. Downloading the file...');
+                        window.location = '/app2/snomed/download'; // Trigger the download
                     },
-                    error: function(jqXHR, textStatus, errorThrown) {
-                        console.error("Value set generation failed:", textStatus, errorThrown);
-                        alert("Error generating value set. Please try again.");
-                    }
+                    error: function (jqXHR, textStatus, errorThrown) {
+                        console.error('Error generating value set:', textStatus, errorThrown);
+                        alert('Error generating value set. Please try again.');
+                    },
                 });
             });
-
             // Handle "Select All" for ICD-10 mappings
             $(document).on('change', '#select-all-icd', function() {
                 const isChecked = $(this).is(':checked');
                 $('.icd-checkbox').prop('checked', isChecked);
             });
         });
+document.getElementById('git-sync-btn').addEventListener('click', function() {
+    fetch('/sync-git', { method: 'POST' })
+        .then(response => response.json())
+        .then(data => {
+            if (data.message) {
+                document.getElementById('git-sync-result').innerText = data.message;
+            } else if (data.error) {
+                document.getElementById('git-sync-result').innerText = `Error: ${data.error}`;
+            }
+        })
+        .catch(error => {
+            console.error('Error during Git sync:', error);
+            document.getElementById('git-sync-result').innerText = 'Error syncing Git. Check console for details.';
+        });
+});
+
     </script>
+            <button id="git-sync-btn">Sync Git</button>
+<div id="git-sync-result"></div>
 </body>
 </html>

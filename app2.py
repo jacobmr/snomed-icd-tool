@@ -85,6 +85,8 @@ def snomed_to_icd():
     except Exception as e:
         return jsonify({'error': f"Internal Server Error: {str(e)}"}), 500
 
+from flask import session
+
 @app2_blueprint.route('/snomed/value-set', methods=['POST'])
 def generate_value_set():
     try:
@@ -95,19 +97,51 @@ def generate_value_set():
         if not icd10_codes:
             return jsonify({'error': 'No ICD-10 codes provided'}), 400
 
-        file_path = f"/tmp/{search_term.replace(' ', '_')}_valueset.xlsx"
+        # Save the file in a persistent directory
+        file_dir = "/home/jacobr/vsac/"
+        file_name = f"{search_term.replace(' ', '_')}_valueset.xlsx"
+        file_path = os.path.join(file_dir, file_name)
 
         df = pd.DataFrame([{'Search Term': search_term, 'ICD-10 Codes': ', '.join(icd10_codes)}])
         df.to_excel(file_path, index=False)
 
-        return jsonify({'download_url': f"/vsac/{os.path.basename(file_path)}"}), 200
+        # Store the filename in session for retrieval
+        session['last_generated_file'] = file_name
+
+        return jsonify({'message': 'File generated successfully'}), 200
     except Exception as e:
         return jsonify({'error': f"Internal Server Error: {str(e)}"}), 500
 
+
+@app2_blueprint.route('/snomed/download', methods=['GET'])
+def download_last_file():
+    try:
+        # Retrieve the last generated file from session
+        file_name = session.get('last_generated_file')
+        if not file_name:
+            return jsonify({'error': 'No file available for download'}), 400
+
+        file_path = os.path.join("/home/jacobr/vsac/", file_name)
+        if os.path.exists(file_path):
+            return send_file(file_path, as_attachment=True, download_name=file_name)
+        else:
+            return jsonify({'error': 'File not found'}), 404
+    except Exception as e:
+        print(f"Error in download endpoint: {str(e)}")
+        return jsonify({'error': f"Internal Server Error: {str(e)}"}), 500
+
+
 @app2_blueprint.route('/vsac/<filename>', methods=['GET'])
 def download_file(filename):
-    file_path = f"/tmp/{filename}"
-    if os.path.exists(file_path):
-        return send_file(file_path, as_attachment=True, download_name=filename)
-    else:
-        return jsonify({'error': 'File not found'}), 404
+    try:
+        # Use the same persistent directory as app.py
+        file_path = os.path.join("/home/jacobr/vsac/", filename)
+
+        if os.path.exists(file_path):
+            # Serve the file as an attachment with the correct filename
+            return send_file(file_path, as_attachment=True, download_name=filename)
+        else:
+            return jsonify({'error': 'File not found'}), 404
+    except Exception as e:
+        print(f"Error in download_file endpoint: {str(e)}")
+        return jsonify({'error': f"Internal Server Error: {str(e)}"}), 500

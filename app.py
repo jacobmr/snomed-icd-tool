@@ -3,6 +3,9 @@ from dotenv import load_dotenv
 import os
 import requests
 import pandas as pd
+import subprocess
+
+
 
 # Load environment variables
 load_dotenv()
@@ -42,6 +45,28 @@ def search_valuesets(term):
 @app.route('/')
 def index():
     return render_template('index.html')
+
+
+@app.route('/sync-git', methods=['POST'])
+def sync_git():
+    try:
+        # Replace with your project directory
+        project_dir = "/home/jacobr/vsac/"
+
+        # Run git commands
+        subprocess.run(["git", "-C", project_dir, "add", "."], check=True)
+        subprocess.run(["git", "-C", project_dir, "commit", "-m", "Auto-sync from web button"], check=True)
+        subprocess.run(["git", "-C", project_dir, "push", "origin", "main"], check=True)
+
+        return jsonify({"message": "Git sync completed successfully"}), 200
+    except subprocess.CalledProcessError as e:
+        print(f"Git sync error: {e}")
+        return jsonify({"error": "Git sync failed"}), 500
+    except Exception as e:
+        print(f"Unexpected error during Git sync: {e}")
+        return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
+
+
 
 @app.route('/snomed-tool')
 def snomed_tool():
