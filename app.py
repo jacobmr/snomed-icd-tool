@@ -50,18 +50,28 @@ def index():
 def sync_git():
     try:
         project_dir = "/home/jacobr/vsac/"
-        subprocess.run(["git", "-C", project_dir, "add", "."], check=True)
-        subprocess.run(["git", "-C", project_dir, "commit", "-m", "Auto-sync from direct access"], check=True)
-        subprocess.run(["git", "-C", project_dir, "push", "origin", "main"], check=True)
+        commits = request.args.get('commits')  # Get the rollback parameter
 
-        return jsonify({"message": "Git sync completed successfully"}), 200
+        if commits:
+            # Rollback the specified number of commits
+            print(f"Rolling back {commits} commits")
+            subprocess.run(["git", "-C", project_dir, "reset", f"HEAD~{commits}"], check=True)
+            subprocess.run(["git", "-C", project_dir, "push", "--force"], check=True)
+
+            return jsonify({"message": f"Rolled back {commits} commits successfully"}), 200
+        else:
+            # Perform a normal Git sync
+            subprocess.run(["git", "-C", project_dir, "add", "."], check=True)
+            subprocess.run(["git", "-C", project_dir, "commit", "-m", "Auto-sync from direct access"], check=True)
+            subprocess.run(["git", "-C", project_dir, "push", "origin", "main"], check=True)
+
+            return jsonify({"message": "Git sync completed successfully"}), 200
     except subprocess.CalledProcessError as e:
-        print(f"Git sync error: {e}")
-        return jsonify({"error": "Git sync failed"}), 500
+        print(f"Git command error: {e}")
+        return jsonify({"error": f"Git operation failed: {e}"}), 500
     except Exception as e:
-        print(f"Unexpected error during Git sync: {e}")
+        print(f"Unexpected error during Git operation: {e}")
         return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
-
 
 @app.route('/snomed-tool')
 def snomed_tool():
