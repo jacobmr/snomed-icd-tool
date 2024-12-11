@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify, send_file
+from flask import Blueprint, request, jsonify, send_file, session
 import requests
 import pandas as pd
 import os
@@ -73,7 +73,6 @@ def snomed_to_icd():
                 response = requests.get(url, params=params)
 
                 if response.status_code != 200:
-                    # Log and skip if there's an issue
                     results.append({
                         'snomed_id': snomed_id,
                         'snomed_name': snomed_name,
@@ -100,7 +99,6 @@ def snomed_to_icd():
                     break
                 page += 1
 
-            # Append final results
             results.append({
                 'snomed_id': snomed_id,
                 'snomed_name': snomed_name,
@@ -110,9 +108,6 @@ def snomed_to_icd():
         return jsonify(results)
     except Exception as e:
         return jsonify({'error': f"Internal Server Error: {str(e)}"}), 500
-
-
-from flask import session
 
 @app2_blueprint.route('/snomed/value-set', methods=['POST'])
 def generate_value_set():
@@ -132,18 +127,15 @@ def generate_value_set():
         df = pd.DataFrame([{'Search Term': search_term, 'ICD-10 Codes': ', '.join(icd10_codes)}])
         df.to_excel(file_path, index=False)
 
-        # Store the filename in session for retrieval
         session['last_generated_file'] = file_name
 
         return jsonify({'message': 'File generated successfully'}), 200
     except Exception as e:
         return jsonify({'error': f"Internal Server Error: {str(e)}"}), 500
 
-
 @app2_blueprint.route('/snomed/download', methods=['GET'])
 def download_last_file():
     try:
-        # Retrieve the last generated file from session
         file_name = session.get('last_generated_file')
         if not file_name:
             return jsonify({'error': 'No file available for download'}), 400
@@ -154,21 +146,15 @@ def download_last_file():
         else:
             return jsonify({'error': 'File not found'}), 404
     except Exception as e:
-        print(f"Error in download endpoint: {str(e)}")
         return jsonify({'error': f"Internal Server Error: {str(e)}"}), 500
-
 
 @app2_blueprint.route('/vsac/<filename>', methods=['GET'])
 def download_file(filename):
     try:
-        # Use the same persistent directory as app.py
         file_path = os.path.join("/home/jacobr/vsac/", filename)
-
         if os.path.exists(file_path):
-            # Serve the file as an attachment with the correct filename
             return send_file(file_path, as_attachment=True, download_name=filename)
         else:
             return jsonify({'error': 'File not found'}), 404
     except Exception as e:
-        print(f"Error in download_file endpoint: {str(e)}")
         return jsonify({'error': f"Internal Server Error: {str(e)}"}), 500
