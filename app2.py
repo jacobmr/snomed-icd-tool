@@ -42,12 +42,15 @@ def snomed_search():
             return jsonify({'error': 'Search failed'}), 500
 
         results = response.json().get('result', {}).get('results', [])
-        output = [{'name': item['name'], 'ui': item['ui']} for item in results]
+        # Filter results to include only SNOMED CT Concept IDs (numeric IDs)
+        filtered_results = [
+            {'name': item['name'], 'ui': item['ui']}
+            for item in results if item['ui'].isdigit()
+        ]
 
-        return jsonify(output)
+        return jsonify(filtered_results)
     except Exception as e:
         return jsonify({'error': f"Internal Server Error: {str(e)}"}), 500
-
 @app2_blueprint.route('/snomed/map', methods=['POST'])
 def snomed_to_icd():
     try:
@@ -68,11 +71,12 @@ def snomed_to_icd():
             page = 1
             all_icd_codes = []
             while True:
-                url = f"https://uts-ws.nlm.nih.gov/rest/content/current/CUI/{snomed_id}/atoms"
+                url = f"https://uts-ws.nlm.nih.gov/rest/content/current/source/SNOMEDCT_US/{snomed_id}/atoms"
                 params = {'ticket': ticket, 'sabs': 'ICD10CM', 'pageNumber': page}
                 response = requests.get(url, params=params)
 
                 if response.status_code != 200:
+                    # Log and skip if there's an issue
                     results.append({
                         'snomed_id': snomed_id,
                         'snomed_name': snomed_name,
@@ -84,13 +88,13 @@ def snomed_to_icd():
                 if not data:
                     break
 
-                # Extract ICD-10 codes
+                # Extract ICD-10 codes where the root source is ICD10CM
                 icd_codes = [
                     {
                         'code': atom.get('code', '').split('/')[-1],
                         'description': atom.get('name', 'N/A')
                     }
-                    for atom in data if 'code' in atom
+                    for atom in data if atom.get('rootSource') == 'ICD10CM'
                 ]
                 all_icd_codes.extend(icd_codes)
 
@@ -99,6 +103,7 @@ def snomed_to_icd():
                     break
                 page += 1
 
+            # Append final results
             results.append({
                 'snomed_id': snomed_id,
                 'snomed_name': snomed_name,
