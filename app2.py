@@ -26,7 +26,6 @@ def get_ticket(tgt_url):
     raise Exception("Failed to obtain ticket")
 
 # Routes
-
 @app2_blueprint.route('/snomed/search', methods=['POST'])
 def snomed_search():
     """Search SNOMED CT Terms for Disorders Only"""
@@ -90,26 +89,38 @@ def snomed_search():
 
 @app2_blueprint.route('/snomed/map', methods=['POST'])
 def snomed_to_icd():
-    """Map SNOMED CT terms to ICD-10 codes"""
+    """Map SNOMED CT Codes to ICD-10"""
     try:
         payload = request.json
-        selected_terms = payload.get("selected_terms", [])
+        selected_terms = payload.get('selected_terms', [])
         if not selected_terms:
-            return jsonify({"error": "No SNOMED CT terms provided"}), 400
+            return jsonify({"error": "No terms provided"}), 400
 
         tgt_url = get_tgt()
-        ticket = get_ticket(tgt_url)
         results = []
 
         for term in selected_terms:
-            snomed_code = term.get("code")
-            snomed_name = term.get("name", "N/A")
+            snomed_code = term.get('code')  # Use 'code' instead of 'ui'
+            snomed_name = term.get('name', 'N/A')
 
-            # Query ICD-10 mappings for the SNOMED CT term
-            icd_url = f"https://uts-ws.nlm.nih.gov/rest/content/current/source/SNOMEDCT_US/{snomed_code}/atoms"
-            params = {"ticket": ticket, "sabs": "ICD10CM"}
-            response = requests.get(icd_url, params=params)
-            if response.status_code != 200:
+            if not snomed_code:
+                results.append({
+                    "snomed_code": None,
+                    "snomed_name": snomed_name,
+                    "error": "Invalid SNOMED code"
+                })
+                continue
+
+            print(f"Mapping SNOMED Code: {snomed_code}, Name: {snomed_name}")
+
+            # Fetch fresh ticket for mapping request
+            ticket = get_ticket(tgt_url)
+            mapping_url = f"https://uts-ws.nlm.nih.gov/rest/content/current/source/SNOMEDCT_US/{snomed_code}/mappings"
+            mapping_params = {"ticket": ticket, "targetSource": "ICD10CM"}
+            mapping_response = requests.get(mapping_url, params=mapping_params)
+
+            if mapping_response.status_code != 200:
+                print(f"Failed to retrieve mappings for SNOMED Code: {snomed_code}")
                 results.append({
                     "snomed_code": snomed_code,
                     "snomed_name": snomed_name,
@@ -117,23 +128,22 @@ def snomed_to_icd():
                 })
                 continue
 
-            # Extract ICD-10 codes
-            mappings = response.json().get("result", [])
+            # Extract ICD-10 mappings
+            mappings = mapping_response.json().get('result', [])
             icd10_codes = [
-                {"code": atom.get("code", "").split("/")[-1], "description": atom.get("name", "N/A")}
-                for atom in mappings if atom.get("rootSource") == "ICD10CM"
+                {"code": mapping.get('targetCode'), "description": mapping.get('targetName')}
+                for mapping in mappings if mapping.get('targetCode')
             ]
 
             results.append({
                 "snomed_code": snomed_code,
                 "snomed_name": snomed_name,
-                "icd10": icd10_codes
+                "icd10": icd10_codes or []
             })
 
         return jsonify(results)
     except Exception as e:
         return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
-
 
 @app2_blueprint.route('/snomed/value-set', methods=['POST'])
 def generate_value_set():
