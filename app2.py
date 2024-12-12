@@ -7,159 +7,173 @@ import os
 app2_blueprint = Blueprint('app2', __name__)
 
 # Environment variables
-UMLS_API_KEY = os.getenv("UMLS_API_KEY", "default-key")  # Use a default for local testing
+UMLS_API_KEY = os.getenv("UMLS_API_KEY", "fa49cc0a-d8a6-43c9-a5e2-3610dacbf8fd")  # Default key for local testing
 
 # Helper functions for UMLS API
 def get_tgt():
-    url = 'https://utslogin.nlm.nih.gov/cas/v1/api-key'
-    response = requests.post(url, data={'apikey': UMLS_API_KEY})
+    """Obtain Ticket-Granting Ticket (TGT)"""
+    url = "https://utslogin.nlm.nih.gov/cas/v1/api-key"
+    response = requests.post(url, data={"apikey": UMLS_API_KEY})
     if response.status_code == 201:
-        return response.headers['location']
+        return response.headers["location"]
     raise Exception("Failed to obtain TGT")
 
 def get_ticket(tgt_url):
-    response = requests.post(tgt_url, data={'service': 'http://umlsks.nlm.nih.gov'})
+    """Obtain a Service Ticket (ST)"""
+    response = requests.post(tgt_url, data={"service": "http://umlsks.nlm.nih.gov"})
     if response.status_code == 200:
         return response.text
     raise Exception("Failed to obtain ticket")
 
 # Routes
+
 @app2_blueprint.route('/snomed/search', methods=['POST'])
 def snomed_search():
+    """Search SNOMED CT Terms for Disorders Only"""
     try:
-        term = request.json.get('term')
+        term = request.json.get("term")
         if not term:
-            return jsonify({'error': 'Search term is required'}), 400
+            return jsonify({"error": "Search term is required"}), 400
 
         tgt_url = get_tgt()
+
+        # Step 1: Perform the search
         ticket = get_ticket(tgt_url)
+        search_url = "https://uts-ws.nlm.nih.gov/rest/search/current"
+        params = {
+            "string": term,
+            "ticket": ticket,
+            "sabs": "SNOMEDCT_US",
+            "searchType": "words"
+        }
+        search_response = requests.get(search_url, params=params)
+        if search_response.status_code != 200:
+            return jsonify({"error": "Failed to search SNOMED CT terms"}), 500
 
-        url = "https://uts-ws.nlm.nih.gov/rest/search/current"
-        params = {'string': term, 'ticket': ticket, 'sabs': 'SNOMEDCT_US', 'searchType': 'words'}
-        response = requests.get(url, params=params)
-
-        if response.status_code != 200:
-            return jsonify({'error': 'Search failed'}), 500
-
-        results = response.json().get('result', {}).get('results', [])
-        # Filter results to include only SNOMED CT Concept IDs (numeric IDs)
-        filtered_results = [
-            {'name': item['name'], 'ui': item['ui']}
-            for item in results if item['ui'].isdigit()
+        # Step 2: Extract CUIs for SNOMED CT
+        results = search_response.json().get("result", {}).get("results", [])
+        snomed_cuis = [
+            result.get("ui") for result in results if result.get("rootSource") == "SNOMEDCT_US"
         ]
 
-        return jsonify(filtered_results)
+        if not snomed_cuis:
+            return jsonify({"message": "No SNOMED CT disorders found"}), 404
+
+        # Step 3: Retrieve disorders mapped to ICD-10
+        output = []
+        for cui in snomed_cuis:
+            print(f"Retrieving SNOMED CT terms for CUI: {cui}")
+            ticket = get_ticket(tgt_url)  # Fetch a fresh ticket
+            atoms_url = f"https://uts-ws.nlm.nih.gov/rest/content/current/CUI/{cui}/atoms"
+            atoms_params = {"ticket": ticket, "sabs": "SNOMEDCT_US"}
+            atoms_response = requests.get(atoms_url, params=atoms_params)
+            if atoms_response.status_code != 200:
+                print(f"Failed to retrieve atoms for CUI {cui}. Status: {atoms_response.status_code}, Response: {atoms_response.text}")
+                continue
+
+            # Filter atoms for disorders and ICD-10 mappable terms
+            atoms = atoms_response.json().get("result", [])
+            for atom in atoms:
+                if atom.get("rootSource") == "SNOMEDCT_US" and "disorder" in atom.get("name", "").lower():
+                    code = atom.get("code", "").split("/")[-1]
+                    name = atom.get("name", "")
+                    if code and name:
+                        output.append({"code": code, "name": name})
+                        print(f"Extracted Disorder: Code: {code}, Name: {name}")
+
+        # Step 4: Return the results
+        print(f"Response Sent to UX: {output}")
+        return jsonify(output)
     except Exception as e:
-        return jsonify({'error': f"Internal Server Error: {str(e)}"}), 500
+        return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
+
+
 @app2_blueprint.route('/snomed/map', methods=['POST'])
 def snomed_to_icd():
+    """Map SNOMED CT terms to ICD-10 codes"""
     try:
         payload = request.json
-        selected_terms = payload.get('selected_terms', [])
+        selected_terms = payload.get("selected_terms", [])
         if not selected_terms:
-            return jsonify({"error": "No terms provided"}), 400
+            return jsonify({"error": "No SNOMED CT terms provided"}), 400
 
         tgt_url = get_tgt()
         ticket = get_ticket(tgt_url)
         results = []
 
         for term in selected_terms:
-            snomed_id = term['ui']
-            snomed_name = term.get('name', 'N/A')
+            snomed_code = term.get("code")
+            snomed_name = term.get("name", "N/A")
 
-            # Iterate through all pages of mappings
-            page = 1
-            all_icd_codes = []
-            while True:
-                url = f"https://uts-ws.nlm.nih.gov/rest/content/current/source/SNOMEDCT_US/{snomed_id}/atoms"
-                params = {'ticket': ticket, 'sabs': 'ICD10CM', 'pageNumber': page}
-                response = requests.get(url, params=params)
+            # Query ICD-10 mappings for the SNOMED CT term
+            icd_url = f"https://uts-ws.nlm.nih.gov/rest/content/current/source/SNOMEDCT_US/{snomed_code}/atoms"
+            params = {"ticket": ticket, "sabs": "ICD10CM"}
+            response = requests.get(icd_url, params=params)
+            if response.status_code != 200:
+                results.append({
+                    "snomed_code": snomed_code,
+                    "snomed_name": snomed_name,
+                    "error": "Failed to retrieve mappings"
+                })
+                continue
 
-                if response.status_code != 200:
-                    # Log and skip if there's an issue
-                    results.append({
-                        'snomed_id': snomed_id,
-                        'snomed_name': snomed_name,
-                        'error': 'Failed to retrieve mappings'
-                    })
-                    break
+            # Extract ICD-10 codes
+            mappings = response.json().get("result", [])
+            icd10_codes = [
+                {"code": atom.get("code", "").split("/")[-1], "description": atom.get("name", "N/A")}
+                for atom in mappings if atom.get("rootSource") == "ICD10CM"
+            ]
 
-                data = response.json().get('result', [])
-                if not data:
-                    break
-
-                # Extract ICD-10 codes where the root source is ICD10CM
-                icd_codes = [
-                    {
-                        'code': atom.get('code', '').split('/')[-1],
-                        'description': atom.get('name', 'N/A')
-                    }
-                    for atom in data if atom.get('rootSource') == 'ICD10CM'
-                ]
-                all_icd_codes.extend(icd_codes)
-
-                # Check if there's another page
-                if len(data) < 25:  # Assuming 25 results per page
-                    break
-                page += 1
-
-            # Append final results
             results.append({
-                'snomed_id': snomed_id,
-                'snomed_name': snomed_name,
-                'icd10': all_icd_codes
+                "snomed_code": snomed_code,
+                "snomed_name": snomed_name,
+                "icd10": icd10_codes
             })
 
         return jsonify(results)
     except Exception as e:
-        return jsonify({'error': f"Internal Server Error: {str(e)}"}), 500
+        return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
+
 
 @app2_blueprint.route('/snomed/value-set', methods=['POST'])
 def generate_value_set():
+    """Generate an Excel file for SNOMED CT terms and ICD-10 codes"""
     try:
         payload = request.json
-        search_term = payload.get('term', 'unknown')
-        icd10_codes = payload.get('icd10_codes', [])
+        search_term = payload.get("term", "unknown")
+        icd10_codes = payload.get("icd10_codes", [])
 
         if not icd10_codes:
-            return jsonify({'error': 'No ICD-10 codes provided'}), 400
+            return jsonify({"error": "No ICD-10 codes provided"}), 400
 
         # Save the file in a persistent directory
         file_dir = "/home/jacobr/vsac/"
+        os.makedirs(file_dir, exist_ok=True)  # Ensure directory exists
         file_name = f"{search_term.replace(' ', '_')}_valueset.xlsx"
         file_path = os.path.join(file_dir, file_name)
 
-        df = pd.DataFrame([{'Search Term': search_term, 'ICD-10 Codes': ', '.join(icd10_codes)}])
+        df = pd.DataFrame([{"Search Term": search_term, "ICD-10 Codes": ", ".join(icd10_codes)}])
         df.to_excel(file_path, index=False)
 
-        session['last_generated_file'] = file_name
+        session["last_generated_file"] = file_name
 
-        return jsonify({'message': 'File generated successfully'}), 200
+        return jsonify({"message": "File generated successfully", "file_path": file_path}), 200
     except Exception as e:
-        return jsonify({'error': f"Internal Server Error: {str(e)}"}), 500
+        return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
+
 
 @app2_blueprint.route('/snomed/download', methods=['GET'])
 def download_last_file():
+    """Download the last generated value set file"""
     try:
-        file_name = session.get('last_generated_file')
+        file_name = session.get("last_generated_file")
         if not file_name:
-            return jsonify({'error': 'No file available for download'}), 400
+            return jsonify({"error": "No file available for download"}), 400
 
         file_path = os.path.join("/home/jacobr/vsac/", file_name)
         if os.path.exists(file_path):
             return send_file(file_path, as_attachment=True, download_name=file_name)
         else:
-            return jsonify({'error': 'File not found'}), 404
+            return jsonify({"error": "File not found"}), 404
     except Exception as e:
-        return jsonify({'error': f"Internal Server Error: {str(e)}"}), 500
-
-@app2_blueprint.route('/vsac/<filename>', methods=['GET'])
-def download_file(filename):
-    try:
-        file_path = os.path.join("/home/jacobr/vsac/", filename)
-        if os.path.exists(file_path):
-            return send_file(file_path, as_attachment=True, download_name=filename)
-        else:
-            return jsonify({'error': 'File not found'}), 404
-    except Exception as e:
-        return jsonify({'error': f"Internal Server Error: {str(e)}"}), 500
+        return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
