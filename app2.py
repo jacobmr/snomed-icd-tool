@@ -41,7 +41,10 @@ def query_atoms(cui, sab, ticket):
 
     try:
         data = response.json().get('result', [])
-        codes = [atom['code'].split('/')[-1] for atom in data if atom.get('rootSource') == sab]
+        codes = [{
+            'code': atom['code'].split('/')[-1],
+            'description': atom.get('name', 'No description available')
+        } for atom in data if atom.get('rootSource') == sab]
         return codes
     except Exception as e:
         logger.error(f"Error parsing response for CUI {cui}: {e}")
@@ -69,23 +72,37 @@ def expand_range(code_range):
 @app2_blueprint.route('/snomed/map', methods=['POST'])
 def snomed_to_icd():
     try:
-        selected_ids = request.json.get('selected_ids', [])
+        selected_terms = request.json.get('selected_terms', [])
         tgt_url = get_tgt()
         ticket = get_ticket(tgt_url)
 
-        all_icd_codes = []
-        for snomed_id in selected_ids:
+        all_mappings = []
+        for term in selected_terms:
+            snomed_id = term['code']
+            snomed_name = term['name']
+
             icd10cm_codes = query_atoms(snomed_id, 'ICD10CM', ticket)
             icd10_codes = query_atoms(snomed_id, 'ICD10', ticket)
 
-            combined_codes = set(icd10cm_codes + icd10_codes)
-            for code in combined_codes:
-                expanded_codes = expand_range(code)
-                all_icd_codes.extend(expanded_codes)
+            combined_codes = icd10cm_codes + icd10_codes
+            mappings = []
 
-        unique_codes = sorted(set(all_icd_codes))
-        logger.info(f"Retrieved ICD-10 codes: {unique_codes}")
-        return jsonify({'icd_codes': unique_codes})
+            for code_entry in combined_codes:
+                expanded_codes = expand_range(code_entry['code'])
+                for code in expanded_codes:
+                    mappings.append({
+                        'code': code,
+                        'description': code_entry['description']
+                    })
+
+            all_mappings.append({
+                'snomed_code': snomed_id,
+                'snomed_name': snomed_name,
+                'icd10': mappings
+            })
+
+        logger.info(f"Retrieved ICD-10 mappings: {all_mappings}")
+        return jsonify(all_mappings)
 
     except Exception as e:
         logger.error(f"Error in snomed_to_icd: {str(e)}")
